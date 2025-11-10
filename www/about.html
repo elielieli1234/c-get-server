@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>About</title>
+    <link rel="stylesheet" href="./assets/special_style.css">
+</head>
+<body>
+    <div class="wrapper">
+        <header>
+            <h1>
+                Welcome to My C Web Server
+            </h1>
+            <nav>
+                <a href="/contact.html">Contact</a>
+                <a href="/index.html">Home</a>
+            </nav>
+        </header>
+        <main>
+            <div class="about_paragraph">
+                <p>This is a super lightweight web server written in C. <br>No frameworks. No magic. Just C, sockets, and HTTP.</p>
+                <p class="ascii">─────────── ✦ ⚙ ✦ ───────────</p>
+                <p>
+                    This is implemented using a thread pool and kernel queue. Specifically, 
+                    I'm using the <code>kqueue</code> API. It's available on MacOS and BSD. There are analogous APIs for 
+                    pretty much any modern operating system, like <code>epoll</code> on Linux and IOCP on Windows. 
+                    The <code>kqueue</code> interface allows our process to be notified by the kernel when there is an event on a file descriptor, 
+                    like incoming connections and available reads. We get to choose what event the kernel monitors for. 
+                    This is nice because it can make threading much simpler, programmatically speaking. 
+                    All we need is a thread to look for connections, accept them, and register them for event
+                    monitoring. Then we need a thread to handle these notifications, where they are doled off to a thread 
+                    pool that handles them. This general architecture—event-driven I/O plus a worker pool—is how many 
+                    modern servers (like nginx or Redis) operate at their core. Here we get to see what that looks like from 
+                    quite a low level, albeit this is microscopically light-weight as compared with the functionality those 
+                    frameworks implement.
+                </p>
+                    <p class="ascii">───+───</p>
+                <p>
+                    The largest efficiency gain in polling for events is that
+                    we don't become I/O bound. If worker threads blocked waiting for input, an arbitrary connection could hog bandwidth by sitting
+                    idly. <code>kqueue</code> for the win!     
+                </p>
+            </div>
+        </main>
+        <footer>
+            <p>© 2025 Elijah Dayney</p>
+        </footer>
+    </div>
+</body>
+</html>
+
