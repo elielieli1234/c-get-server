@@ -25,7 +25,7 @@ int communicate(struct io_operation *op) {
     printf("-------------\n");
 
     if (bytes > 0) {
-        int packet_length = 0; // Length of the packet
+        int packet_length = 0;
         struct packet_node *packets = response_list(buffer);
         if (packets != NULL) { // Send the full response in chunk
             while (packets != NULL) {

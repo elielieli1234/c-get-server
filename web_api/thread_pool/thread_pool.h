@@ -21,6 +21,7 @@ struct io_operation {
 
 /**
  * @brief Communicate over socket when io is available
+ * @brief Wrapper function for socket write when io is available
  * @param op The io operation to be performed over the socket
  * @return 0 on successful communication, 1 on failure
  */

@@ -1,0 +1,15 @@
+- Stress test the server from apache bench
+- Return 503 from the main thread if thread pool is busy
+- Return 403 Forbidden if there is .. in the path
+- Return 405 Not authorized if the method is not GET
+- Implement HEAD requests
+- Do we even need to reregister the fd?
+- Use bounded functions
+- Remove debug statements based on args
+- Handle other http fields
+- Pass client logging from the command line
+
+- Return 503 on busy
+- Return 501 not implemented if the request is not explicitly GET
+- Use command line arguments to note host debug info
+- 

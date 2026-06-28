@@ -1,0 +1,14 @@
+{
+    "files.associations": {
+        "*.py": "python",
+        "inet.h": "c",
+        "types.h": "c",
+        "stdlib.h": "c",
+        "string.h": "c",
+        "socket.h": "c",
+        "netdb.h": "c",
+        "thread_pool.h": "c",
+        "event.h": "c",
+        "time.h": "c"
+    }
+}

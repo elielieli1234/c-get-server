@@ -4,7 +4,15 @@ char *echo_fallback(char *buffer) {
     return buffer;
 }
 
-void url_decode(char *dst, char *src) {
+int sanitize_traversal(char *path, int length) {
+    for (int i = 0; i < length - 1; i++) {
+        if (path[i] == '.' && path[i + 1] == '.') return 0;
+    }
+
+    return 1; // Return true if it's fine
+}
+
+void url_decode(char *dst, char *src, int *length) {
     int path_length = strlen(src), i, j = 0;
     for (i = 0; i < path_length - 2; i++) {
         if (src[i] == '%') {
@@ -25,6 +33,8 @@ void url_decode(char *dst, char *src) {
         dst[j++] = src[i];
         dst[j] = '\0';
     }
+
+    *length = j;
 }
 
 char *check_file_extension(char *path) {
@@ -47,25 +57,35 @@ char *check_file_extension(char *path) {
 }
 
 int check_ver(char *http_version) {
-    if (strlen(http_version) > 5 && strncmp(http_version, "HTTP/", 5) == 0) {
-        char *version = &http_version[5]; // Parse out version no
+    char *v1_1 = "HTTP/1.1";
 
-        // Convert to float
-        float version_no = atof(version);
-        printf("HTTP Version: %2f\n", version_no);
-
-        if (version_no >= 0.9 && version_no < 4) return 1;
+    for (int i = 0; i < 9; i++) {
+        printf("%hhx ", http_version[i]);
+    }
+    printf("\n");
+    for (int i = 0; i < 9; i++) {
+        printf("%hhx ", v1_1[i]);
     }
 
+
+    if (strcmp(http_version, "HTTP/0.9") == 0) return 1;
+    if (strcmp(http_version, "HTTP/1.0") == 0) return 1;
+    if (strcmp(http_version, "HTTP/1.1") == 0) {
+        printf("How is it not this\n");
+        return 1;
+    }
+    if (strcmp(http_version, "HTTP/2") == 0) return 1;
+    if (strcmp(http_version, "HTTP/3") == 0) return 1;
     return 0;
 }
 
-FILE *check_resource(char *resource, char **full_path) {
+FILE *check_resource(char *resource, char **full_path, int *response_number) {
     if (resource[0] != '/') return NULL;
 
     // Build the local path to the resource
     char *local_path;
     char base_path[PACK_LIM] = {'\0'};
+    int path_length = 0, response = 0;
     if (strcmp(resource, "/") == 0) { // Just get home
         local_path = "./www/index.html";
     }
@@ -77,7 +97,13 @@ FILE *check_resource(char *resource, char **full_path) {
 
     // Percent decode the path
     char path_decoded[PACK_LIM] = {'\0'};
-    url_decode(path_decoded, local_path);
+    url_decode(path_decoded, local_path, &path_length);
+
+    // Check if they try to grab some parent directory
+    if (!sanitize_traversal(path_decoded, path_length)) {
+        local_path = "./www/405.html";
+        response = NOT_PERMITTED;
+    }
 
     printf("Opening file path: %s\n", path_decoded);
 
@@ -96,6 +122,7 @@ int parse_request(char *buffer, int *asset_fd, struct head *header_fields) {
     int treat_get = strncmp(buffer, "GET ", 4);
     if (treat_get != 0) {
         fprintf(stderr, "[ERROR]: Not a valid get request.\n");
+        // todo: return not implemented
         return 1;
     }
 
@@ -111,27 +138,19 @@ int parse_request(char *buffer, int *asset_fd, struct head *header_fields) {
 
     // Check HTTP version
     char *ver_context;
-    strtok_r(http_ver, "\n", &ver_context);
+    strtok_r(http_ver, "\n\r", &ver_context);
     if (!check_ver(http_ver)) {
-        fprintf(stderr, "[ERROR]: Invalid HTTP version.\n");
+        fprintf(stderr, "[ERROR]: Invalid HTTP version: Resource: %s, HTTP Version: %s\n", resource, http_ver);
         return 1;
     }
 
-    // Check resource
+    // Check and open resource
     FILE *content_handle;
     char *file_path = NULL; // Obtain the full file path
-    int not_found = 0, stack_path = 0;
-    if ((content_handle = check_resource(resource, &file_path)) == NULL) {
-        fprintf(stderr, "[ERROR]: Requested resource not found, returning 404.\n");
-
-        // Set 404 parameters
-        content_handle = fopen("./www/404.html", "r");
-        if (content_handle == NULL) {
-            fprintf(stderr, "[ERROR]: Could not open 404.\n");
-            return 1;
-        }
-        file_path = strdup("./www/404.html");
-        not_found = 1;
+    int response = 0; // Note response number
+    if ((content_handle = check_resource(resource, &file_path, &response)) == NULL) {
+        fprintf(stderr, "[ERROR]: Could not open file.\n");
+        return 1;
     }
 
     printf("Returning file path: %s\n", file_path);
@@ -154,8 +173,8 @@ int parse_request(char *buffer, int *asset_fd, struct head *header_fields) {
     *asset_fd = fd; // Return the file descriptor
 
     // Build the fields for the packet (stream)
-    header_fields->response = not_found ? "Not Found" : "Ok";
-    header_fields->response_no = not_found ? 404 : 200;
+    header_fields->response = "Ok";
+    header_fields->response_no = 200;
     header_fields->content_type = extension;
     header_fields->content_length = file_info.st_size;
 

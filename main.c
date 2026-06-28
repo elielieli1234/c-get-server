@@ -1,3 +1,4 @@
+#include <stdio.h>
 #include <errno.h>
 #include <pthread.h>
 #include <sys/types.h>
@@ -6,6 +7,7 @@
 
 #include "./web_api/socket/socket.h"
 #include "./web_api/thread_pool/thread_pool.h"
+#include "./web_api/http/http.h"
 
 # define THREAD_NUM 20 // Number of threads handling io ops asynchronously
 
@@ -37,7 +39,14 @@ void *marshall_io(void *arg) {
 
                 int request_handled = submit_op(op);
                 if (request_handled == -1) { // The thread pool is busy
+                    
+                    // busy_fd = fopen("./www/503.html", "r");
+                    // if (busy_fd == -1) 
+                    //     continue; // Ignore the request
+                    
+                    // char packet_buffer[PACK_LIM] = {'\0'};
 
+                    // int head_size = snprintf(packet_buffer, PACK_LIM - 1, "%s", packet_buffer);
                 }
             }
         }     

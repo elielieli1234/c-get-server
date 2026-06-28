@@ -11,6 +11,9 @@
 #include <math.h>
 
 # define PACK_LIM 4096 // Max # bytes we send or recieve at once over the wire
+# define NOT_FOUND 404
+# define NOT_PERMITTED 405
+# define OK 200
 
 struct packet_node {
     size_t length;
@@ -19,10 +22,10 @@ struct packet_node {
 };
 
 struct head {
-    int response_no;
-    const char *response;
-    const char *content_type;
-    int content_length;
+    int response_no;            // HTTP response number
+    const char *response;      
+    const char *content_type;   // HTTP Content type (stylesheet or markup)
+    int content_length;         // HTTP Content length
 };
 
 /**
@@ -39,8 +42,9 @@ char *echo_fallback(char *buffer);
  */
 char *host_response(char *buffer);
 
-// struct packet_node *construct_packet_list(FILE *requested_asset, struct head fields, int *packet_length);
-
+/**
+ * @brief Build a linked list of asset responses?
+ */
 struct packet_node *response_list(char *buffer);
 
 #endif

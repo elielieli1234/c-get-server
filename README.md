@@ -11,3 +11,13 @@
     - Resilient to bad connections and DOS
 - Create a compilation script
 - Compile to a docker container
+
+clang -g -fsanitize=address -o ./executables/main ./web_api/http/http.c ./web_api/socket/socket.c ./web_api/thread_pool/thread_pool.c ./main.c
+
+-Wall
+-Werror
+-Wextra
+clang --analyze
+valgrind
+
+
