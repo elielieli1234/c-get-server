@@ -7,7 +7,6 @@
 
 #include "./web_api/socket/socket.h"
 #include "./web_api/thread_pool/thread_pool.h"
-#include "./web_api/http/http.h"
 
 # define THREAD_NUM 20 // Number of threads handling io ops asynchronously
 
@@ -28,25 +27,14 @@ void *marshall_io(void *arg) {
             if (event.flags & EV_EOF) {
                 printf("\nClient %lu disconnected\n", event.ident);
                 close(event.ident);  // Clean up
-            } else {
-                printf("\nClient %lu is readable\n", event.ident);
-            
-                // Queue the operation for the thread pool
+            } else { // Queue the operation for the thread pool
                 struct io_operation op;
                 op.host_fd = fd;
                 op.client_fd = event.ident;
-                op.kq = kq; // Put the file descriptor back on kernel queue
-
+                op.kq = kq; // Put the fd back on queue
                 int request_handled = submit_op(op);
                 if (request_handled == -1) { // The thread pool is busy
-                    
-                    // busy_fd = fopen("./www/503.html", "r");
-                    // if (busy_fd == -1) 
-                    //     continue; // Ignore the request
-                    
-                    // char packet_buffer[PACK_LIM] = {'\0'};
-
-                    // int head_size = snprintf(packet_buffer, PACK_LIM - 1, "%s", packet_buffer);
+                    // TODO Return 404
                 }
             }
         }     
@@ -84,7 +72,7 @@ int main() {
     pthread_detach(marshall_thread);
 
     // Accept arbitrary connections
-    int session = 0;
+    unsigned int session = 0;
     while (1) {
         int log_client = 1;
         int client_fd = client_socket_init(log_client, sockfd);

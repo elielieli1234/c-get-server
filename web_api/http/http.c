@@ -1,232 +1,150 @@
 #include "http.h"
+#include "response.h"
 
-char *echo_fallback(char *buffer) {
-    return buffer;
-}
+static const char *response_strings[] = {
+    "Bad Request",
+    "Forbidden",
+    "Not Found",
+    "Not Implemented",
+    "Server Busy",
+    "Internal Server Error",
+    "Ok"
+};
 
-int sanitize_traversal(char *path, int length) {
-    for (int i = 0; i < length - 1; i++) {
-        if (path[i] == '.' && path[i + 1] == '.') return 0;
-    }
+static const int response_ints[] = {
+    BAD_REQUEST, 
+    FORBIDDEN, 
+    NOT_FOUND, 
+    NOT_IMPLEMENTED, 
+    SERVER_BUSY, 
+    INTERNAL_ERROR, 
+    OK
+};
 
-    return 1; // Return true if it's fine
-}
+// Request parsing
+extern int  verify_req(char *request_type);
+extern int  verify_ver(char *http_version);
+extern char *grab_extension(char *path);
 
-void url_decode(char *dst, char *src, int *length) {
-    int path_length = strlen(src), i, j = 0;
-    for (i = 0; i < path_length - 2; i++) {
-        if (src[i] == '%') {
-            char upper_digit, lower_digit, num;
-            upper_digit = src[i + 1];
-            lower_digit = src[i + 2];
-            char hex_num[3] = {upper_digit, lower_digit, '\0'};
-            num = (int) strtol(hex_num, NULL, 16);
-            dst[j++] = num;
-            i += 2;
-        }
-        else {
-            dst[j++] = src[i];
-        }
-    }
-    if (src[i - 1] != '%') {
-        dst[j++] = src[i++];
-        dst[j++] = src[i];
-        dst[j] = '\0';
-    }
+// Graceful file open
+extern void file_try_open(char *resource, void *header_metadata, int response_no);
 
-    *length = j;
-}
+// Message construction
+extern void *message(void *header);
+extern void *chunked_message(void *header);
+extern void *internal_error_message(void *header);
 
-char *check_file_extension(char *path) {
-    const char *dot = strrchr(path, '.');
-    if (!dot || dot == path) return NULL;
+static void print_header(Header *response);
+
+/**
+ * @brief Parse the semantic tokens of the HTTP request
+ * @param buffer The contents of the request as a byte array
+ * @param header A pointer to write back the response metadata
+ */
+void request_parse(char *buffer, Header *header) { 
+    const char *file_extension, *response_type;
+    char *line_context, *field_context; 
+
+    // Hold the semantic fields of the request
+    char *request_type  = NULL;
+    char *resource_path = NULL;
+    char *http_version  = NULL;
+
+    const int response_map_len = sizeof(response_ints) / sizeof(int);
+    int response = OK, get = -1;
+
+    Header_Metadata data = {0};
+    FILE *asset_handle    = NULL;
     
-    if (strcmp(dot, ".html") == 0) {
-        return "text/html";
+    // Grab the first line
+    char *line = strtok_r(buffer, "\n\r", &line_context);
+    if (!line) {
+        response = BAD_REQUEST;
+        goto construct_msg;
     }
-    else if (strcmp(dot, ".ico") == 0) {
-        return "image/x-icon";
+
+    // Grab the constituent fields
+    if (!(request_type  = strtok_r(line, " ", &field_context)) ||
+        !(resource_path = strtok_r(NULL, " ", &field_context)) ||
+        !(http_version  = strtok_r(NULL, " ", &field_context)))
+    {
+        response = BAD_REQUEST;
+        goto construct_msg;
     }
-    else if (strcmp(dot, ".css") == 0) {
-        return "text/css";
+
+    // Verify the request type
+    get = verify_req(request_type);
+    if (get != 1) {
+        if (get == 0)  response = NOT_IMPLEMENTED;
+        if (get == -1) response = BAD_REQUEST; // TODO FIX 400 (wrong)
+        goto construct_msg;
     }
-    else if (strcmp(dot, ".jpg") == 0) {
-        return "image/jpg";
+
+    // Verify the HTTP version and downgrade
+    if (!verify_ver(http_version)) {
+        response = BAD_REQUEST;
+        goto construct_msg;
     }
-    else return NULL;
+
+construct_msg: // Fill the remaining header fields
+    file_try_open(resource_path, (void *) &data, response);
+    if (data.uri) file_extension = grab_extension(data.uri);
+    for (int i = 0, response = data.response_no; i < response_map_len; i++) {
+        if (response == response_ints[i]) {
+            response_type = response_strings[i];
+            break;
+        }
+    }
+
+    header->response_type = response_type;
+    header->content_type  = file_extension;
+    header->data = data;
 }
 
-int check_ver(char *http_version) {
-    char *v1_1 = "HTTP/1.1";
+struct message_node *response_list(char *buffer) {
+    Message_Node *head = NULL;
+    Header response = {0}; // Verify the request and grab metadata
 
-    for (int i = 0; i < 9; i++) {
-        printf("%hhx ", http_version[i]);
-    }
-    printf("\n");
-    for (int i = 0; i < 9; i++) {
-        printf("%hhx ", v1_1[i]);
-    }
+    request_parse(buffer, &response);
+    print_header(&response);
 
+    // Concatenate the response header and body
+    if (response.data.response_no == INTERNAL_ERROR) 
+        head = internal_error_message((void *) &response);
+    else if (response.data.chunk)
+        head = chunked_message((void *) &response);
+    else 
+        head = message((void *) &response);
 
-    if (strcmp(http_version, "HTTP/0.9") == 0) return 1;
-    if (strcmp(http_version, "HTTP/1.0") == 0) return 1;
-    if (strcmp(http_version, "HTTP/1.1") == 0) {
-        printf("How is it not this\n");
-        return 1;
-    }
-    if (strcmp(http_version, "HTTP/2") == 0) return 1;
-    if (strcmp(http_version, "HTTP/3") == 0) return 1;
-    return 0;
-}
+    if (!head) {
+        if (response.data.handle) { 
+            fclose(response.data.handle);
+            response.data.handle = NULL;
+        }
+        if (response.data.uri) {
+            free(response.data.uri);
+            response.data.uri = NULL;
+        }
+        while (head) {
+            Message_Node *next = head->next;
+            free(head);
+            head = next;
+        }
 
-FILE *check_resource(char *resource, char **full_path, int *response_number) {
-    if (resource[0] != '/') return NULL;
-
-    // Build the local path to the resource
-    char *local_path;
-    char base_path[PACK_LIM] = {'\0'};
-    int path_length = 0, response = 0;
-    if (strcmp(resource, "/") == 0) { // Just get home
-        local_path = "./www/index.html";
-    }
-    else {
-        memcpy(base_path, "./www", 5);
-        strlcat(base_path, resource, PACK_LIM - 6);
-        local_path = base_path;        
-    }
-
-    // Percent decode the path
-    char path_decoded[PACK_LIM] = {'\0'};
-    url_decode(path_decoded, local_path, &path_length);
-
-    // Check if they try to grab some parent directory
-    if (!sanitize_traversal(path_decoded, path_length)) {
-        local_path = "./www/405.html";
-        response = NOT_PERMITTED;
-    }
-
-    printf("Opening file path: %s\n", path_decoded);
-
-    // Open the requested file
-    FILE *asset = fopen(path_decoded, "r");
-    if (asset == NULL) {
         return NULL;
     }
-    
-    // Return the decoded file path and file handle
-    *full_path = strdup(path_decoded);
-    return asset;
-}
-
-int parse_request(char *buffer, int *asset_fd, struct head *header_fields) {
-    int treat_get = strncmp(buffer, "GET ", 4);
-    if (treat_get != 0) {
-        fprintf(stderr, "[ERROR]: Not a valid get request.\n");
-        // todo: return not implemented
-        return 1;
-    }
-
-    // Tokenize resource and http version
-    char *buffer_context; 
-    strtok_r(buffer, " ", &buffer_context);
-    char *resource = strtok_r(NULL, " ", &buffer_context); // Get the requested resource if any
-    char *http_ver = strtok_r(NULL, " ", &buffer_context); // Get the HTTP Version
-    if (!resource || !http_ver) {
-        fprintf(stderr, "[ERROR]: Not a valid get request.\n");
-        return 1;
-    }
-
-    // Check HTTP version
-    char *ver_context;
-    strtok_r(http_ver, "\n\r", &ver_context);
-    if (!check_ver(http_ver)) {
-        fprintf(stderr, "[ERROR]: Invalid HTTP version: Resource: %s, HTTP Version: %s\n", resource, http_ver);
-        return 1;
-    }
-
-    // Check and open resource
-    FILE *content_handle;
-    char *file_path = NULL; // Obtain the full file path
-    int response = 0; // Note response number
-    if ((content_handle = check_resource(resource, &file_path, &response)) == NULL) {
-        fprintf(stderr, "[ERROR]: Could not open file.\n");
-        return 1;
-    }
-
-    printf("Returning file path: %s\n", file_path);
-
-    // Check and retrieve the file extension
-    const char *extension = check_file_extension(file_path);
-    free(file_path);
-    if (extension == NULL) {
-        fprintf(stderr, "[ERROR]: Unknown file extension.\n");
-        return 1;
-    }
-
-    // Check the file size
-    struct stat file_info;
-    int fd = fileno(content_handle);
-    if (fstat(fd, &file_info) == -1) {
-        fprintf(stderr, "[ERROR]: Failed to stat file size.\n");
-        return 1;
-    }
-    *asset_fd = fd; // Return the file descriptor
-
-    // Build the fields for the packet (stream)
-    header_fields->response = "Ok";
-    header_fields->response_no = 200;
-    header_fields->content_type = extension;
-    header_fields->content_length = file_info.st_size;
-
-    return 0;
-}
-
-struct packet_node *response_list(char *buffer) {
-    int fd; 
-    struct head header;
-    int failed_request = parse_request(buffer, &fd, &header);
-    if (failed_request) return NULL;
-
-    char *asset_bytes = mmap(NULL, header.content_length, PROT_READ , MAP_PRIVATE, fd, 0);
-    if (asset_bytes == NULL) {
-        fprintf(stderr, "[ERROR]: Fatal error mapping resource contents.\n");
-        return NULL;
-    }
-
-    struct packet_node *head = (struct packet_node *) malloc(sizeof(struct packet_node));
-    char packet_buffer[PACK_LIM] = {'\0'};
-    int head_size = snprintf(packet_buffer, PACK_LIM - 1,  
-        "HTTP/1.0 %d %s\r\n"
-        "Content-Type: %s; charset=UTF-8\r\n"
-        "Content-Length: %d\r\n"
-        "Connection: Close\r\n\r\n", 
-        header.response_no, header.response, header.content_type, header.content_length);
-
-    // Create the first buffer node as the header
-    head->length = head_size;
-    head->packet = strdup(packet_buffer);
-    head->next = NULL;
-    
-    // Read the contents into a series of packet buffers
-    struct packet_node *curr = head;
-    for (int i = 0; i < header.content_length; i += PACK_LIM - 1) {
-        char buffered_send[PACK_LIM] = {'\0'};
-        int length = fmin(PACK_LIM - 1, header.content_length - i);
-        memcpy(buffered_send, asset_bytes + i, length);
-
-        struct packet_node *node = (struct packet_node *) malloc(sizeof(struct packet_node));
-        node->length = length;
-        node->packet = (char *) calloc(length + 1, sizeof(char));
-        memcpy(node->packet, buffered_send, length);
-        node->next = NULL;
-
-        // Add the node to the linked list
-        curr->next = node;
-        curr = node;
-    }
-    
-    munmap(asset_bytes, header.content_length);
 
     return head;
-    
+}
+
+static void print_header(Header *response) {
+    printf("I think we got a response, let's take a look...\n");
+    printf("Content type  : %s\n", response->content_type  ? (response->content_type)  : "NA");
+    printf("Response type : %s\n", response->response_type ? (response->response_type) : "NA");
+    printf("Metadata structure ~ \n");
+    printf("    File handle     : %p\n", response->data.handle ? response->data.handle : 0);
+    printf("    File path       : %s\n", response->data.uri ? response->data.uri : "NA");
+    printf("    Response number : %d\n", response->data.response_no);
+    printf("    Response length : %d\n", response->data.length);
+    printf("    Response fd     : %d\n", response->data.fd);
 }

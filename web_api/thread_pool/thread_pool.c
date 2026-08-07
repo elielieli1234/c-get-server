@@ -1,5 +1,6 @@
 #include "./thread_pool.h"
 #include "../http/http.h" // Use request parser to build thread response
+#include "../http/response.h"
 
 // Amorticize enqueueing and dequeuing
 pthread_mutex_t mutex_queue;
@@ -14,31 +15,38 @@ int communicate(struct io_operation *op) {
     int client_fd = op->client_fd;
     int kq = op->kq;
 
+    char buffer[MTU] = {'\0'};
+    ssize_t bytes = recv(client_fd, buffer, MTU - 1, 0);
+
     printf("    Reading from client socket...\n");
-
-    char buffer[PACK_LIM] = {'\0'};
-    ssize_t bytes = recv(client_fd, buffer, PACK_LIM - 1, 0);
-
-    // Print contents to server debug
     printf("---- Got ----\n");
     printf("\n%s\n", buffer);
     printf("-------------\n");
 
+    // TODO: Treat the case where we couldn't get the entire message
+
     if (bytes > 0) {
         int packet_length = 0;
-        struct packet_node *packets = response_list(buffer);
-        if (packets != NULL) { // Send the full response in chunk
-            while (packets != NULL) {
-                send(client_fd, packets->packet, packets->length, 0);
-                
-                // Move onto the next packet
-                struct packet_node *next = packets->next;
-                free(packets->packet);
-                free(packets);
-                packets = next;
+        Message_Node *message_list = response_list(buffer);
+        if (message_list != NULL) { // Send the full response in chunk
+            while (message_list != NULL) {
+                packet_length = strlen(message_list->header) + strlen(message_list->body) + 1;
+            
+                char msg[packet_length];
+                memset(msg, 0, sizeof(msg));
+                strcat(msg, message_list->header);
+                strcat(msg, message_list->body);
+
+                printf("Here is the whole fucking message that we are writing\n");
+                printf("%s\n", msg);
+
+                write(client_fd, msg, packet_length);
+
+                Message_Node *next = message_list->next;
+                free(message_list);
+                message_list = next;
             }
-        }
-        else printf("\nFATAL ERROR GENERATING HOST RESPONSE.\n");
+        } // Ignore requests we couldn't generate a response for
     }
 
     return 0;
