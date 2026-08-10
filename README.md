@@ -1,7 +1,5 @@
 # Get Head
 
-A play project, mind you.
-
 ## About
 A web server in C that serves GET and HEAD requests. Supports markup,
 stylesheets, and binary data.
